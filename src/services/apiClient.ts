@@ -1,5 +1,23 @@
 export const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
+// Generic fetch with timeout to avoid hanging requests in UI (e.g., backend down or CORS issue)
+async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit & { timeoutMs?: number } = {}) {
+  const { timeoutMs = 10000, ...rest } = init;
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...rest, signal: controller.signal });
+  } catch (err: any) {
+    if (err.name === 'AbortError') {
+      throw new Error('Tiempo de espera agotado');
+    }
+    // Propagate clearer network layer message
+    throw new Error('No se pudo conectar con el servidor');
+  } finally {
+    clearTimeout(id);
+  }
+}
+
 export interface LoginResponse {
   access_token: string;
   token_type: string;
@@ -14,10 +32,11 @@ export async function loginRequest(email: string, password: string): Promise<Log
   const form = new URLSearchParams();
   form.append('username', email);
   form.append('password', password);
-  const res = await fetch(`${API_BASE}/users/login`, {
+  const res = await fetchWithTimeout(`${API_BASE}/users/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: form.toString(),
+    timeoutMs: 12000,
   });
   if (!res.ok) {
     const detail = await handleJSON(res);
