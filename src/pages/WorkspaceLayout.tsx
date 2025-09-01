@@ -258,7 +258,7 @@ export default function WorkspaceLayout() {
           <IconButton color="inherit" edge="start" onClick={() => setMobileOpen(!mobileOpen)} sx={{ mr: 1, display: { md: 'none' } }}>
             <MenuIcon />
           </IconButton>
-          <Typography variant="h6" sx={{ flex: 1 }}>Notion Clone</Typography>
+          <Typography variant="h6" sx={{ flex: 1 }}>Wiki</Typography>
           <IconButton size="small" color="inherit" onClick={toggle} sx={{ mr: 1 }}>
             {theme.palette.mode === 'light' ? <DarkModeIcon fontSize="small" /> : <LightModeIcon fontSize="small" />}
           </IconButton>
