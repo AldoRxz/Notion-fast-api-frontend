@@ -1,8 +1,8 @@
-import type { FormEvent } from 'react';
-import { useState } from 'react';
+import { useState, type FormEvent } from 'react';
 import { loginRequest } from '../services/apiClient';
 import { useAuth } from '../hooks/useAuth';
-import { Navigate } from 'react-router-dom';
+import { Navigate, Link as RouterLink } from 'react-router-dom';
+import { Box, Paper, Typography, TextField, Button, Stack, Alert, Link } from '@mui/material';
 
 export default function LoginPage() {
   const { login, isAuthenticated } = useAuth();
@@ -28,34 +28,25 @@ export default function LoginPage() {
   }
 
   return (
-    <div style={{ maxWidth: 420, margin: '60px auto', fontFamily: 'sans-serif' }}>
-      <h1 style={{ textAlign: 'center' }}>Iniciar sesión</h1>
-      <form onSubmit={onSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          Email
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-            style={{ padding: 8 }}
-          />
-        </label>
-        <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          Password
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-            style={{ padding: 8 }}
-          />
-        </label>
-        <button disabled={loading} style={{ padding: '10px 14px', cursor: 'pointer' }}>
-          {loading ? 'Entrando...' : 'Entrar'}
-        </button>
-        {error && <div style={{ color: 'red', fontSize: 14 }}>{error}</div>}
-      </form>
-    </div>
+    <Box flex={1} display="flex" justifyContent="center" alignItems={{ xs:'flex-start', md:'center' }} width="100%" pt={{ xs:6, md:0 }} px={2}>
+      <Paper sx={{ p: { xs:4, sm:5 }, width: '100%', maxWidth: 420, bgcolor:'background.paper', border:'1px solid', borderColor:'divider', backdropFilter:'blur(12px)', backgroundImage: theme => theme.palette.mode==='dark' ? 'linear-gradient(135deg, rgba(255,255,255,0.06), rgba(255,255,255,0))' : 'linear-gradient(135deg, rgba(255,255,255,0.9), rgba(255,255,255,0.65))' }} elevation={10}>
+        <Stack spacing={3}>
+          <Box textAlign="center">
+            <Box sx={{ width:64, height:64, borderRadius:2, border: '1px solid', borderColor:'divider', display:'flex', alignItems:'center', justifyContent:'center', mx:'auto', fontSize:32, fontWeight:600 }}>N</Box>
+            <Typography variant="h5" fontWeight={600} mt={2}>Inicia sesión</Typography>
+            <Typography variant="body2" color="text.secondary">Continúa en tu espacio de trabajo</Typography>
+          </Box>
+          <Box component="form" onSubmit={onSubmit} display="flex" flexDirection="column" gap={2}>
+            <TextField label="Email" type="email" value={email} onChange={(e: React.ChangeEvent<HTMLInputElement>)=>setEmail(e.target.value)} required autoFocus />
+            <TextField label="Password" type="password" value={password} onChange={(e: React.ChangeEvent<HTMLInputElement>)=>setPassword(e.target.value)} required />
+            {error && <Alert severity="error" variant="outlined">{error}</Alert>}
+            <Button disabled={loading} type="submit" fullWidth size="large">{loading? 'Entrando…' : 'Entrar'}</Button>
+          </Box>
+          <Typography variant="caption" textAlign="center" color="text.secondary">
+            ¿No tienes cuenta? <Link component={RouterLink} to="/register">Crear cuenta</Link>
+          </Typography>
+        </Stack>
+      </Paper>
+    </Box>
   );
 }
