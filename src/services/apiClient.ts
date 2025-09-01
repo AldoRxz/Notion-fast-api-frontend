@@ -1,6 +1,5 @@
 export const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
-// Generic fetch with timeout to avoid hanging requests in UI (e.g., backend down or CORS issue)
 async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit & { timeoutMs?: number } = {}) {
   const { timeoutMs = 10000, ...rest } = init;
   const controller = new AbortController();
