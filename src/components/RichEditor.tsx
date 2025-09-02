@@ -4,10 +4,18 @@ import {
 	Editor,
 	Transforms,
 	Range,
+	Point,
 	Element as SlateElement,
 } from "slate";
 import type { Descendant, BaseEditor } from "slate";
-import { Slate, Editable, withReact, ReactEditor } from "slate-react";
+import {
+	Slate,
+	Editable,
+	withReact,
+	ReactEditor,
+	useSelected,
+	useFocused,
+} from "slate-react";
 import {
 	Box,
 	IconButton,
@@ -31,6 +39,7 @@ import ImageIcon from "@mui/icons-material/Image";
 import ArrowUpwardIcon from "@mui/icons-material/ArrowUpward";
 import ArrowDownwardIcon from "@mui/icons-material/ArrowDownward";
 import HorizontalRuleIcon from "@mui/icons-material/HorizontalRule";
+import DeleteIcon from "@mui/icons-material/Delete";
 
 declare module "slate" {
 	interface CustomTypes {
@@ -172,6 +181,73 @@ function withShortcuts(editor: Editor) {
 	return editor;
 }
 
+// Plugin para que un code-block soporte múltiples líneas internas con \n
+function withCodeBlock(editor: Editor) {
+	const { insertBreak, deleteBackward } = editor;
+	editor.insertBreak = () => {
+		const [match] = Editor.nodes(editor, {
+			match: (n) =>
+				SlateElement.isElement(n) &&
+				(n as SlateElement & { type?: string }).type === "code-block",
+		});
+		if (match) {
+			Editor.insertText(editor, "\n");
+			return;
+		}
+		// Enter sobre imagen -> crear párrafo debajo
+		const [img] = Editor.nodes(editor, {
+			match: (n) =>
+				SlateElement.isElement(n) &&
+				(n as SlateElement & { type?: string }).type === "image",
+		});
+		if (img) {
+			const [, imgPath] = img as unknown as [SlateElement, number[]];
+			const newPath = [...imgPath];
+			newPath[newPath.length - 1] += 1;
+			const para: ParagraphElement = {
+				type: "paragraph",
+				children: [{ text: "" }],
+			};
+			Transforms.insertNodes(editor, para, { at: newPath });
+			Transforms.select(editor, Editor.start(editor, newPath));
+			return;
+		}
+		insertBreak();
+	};
+	editor.deleteBackward = (unit) => {
+		const { selection } = editor;
+		if (selection && Range.isCollapsed(selection)) {
+			const [match] = Editor.nodes(editor, {
+				match: (n) =>
+					SlateElement.isElement(n) &&
+					(n as SlateElement & { type?: string }).type === "code-block",
+			});
+			if (match) {
+				const [, path] = match as unknown as [SlateElement, number[]];
+				const start = Editor.start(editor, path);
+				if (Point.equals(selection.anchor, start)) {
+					// salir del code-block si está al inicio
+					Transforms.setNodes(editor, {
+						type: "paragraph",
+					} as Partial<SlateElement>);
+					return;
+				}
+			}
+		}
+		deleteBackward(unit);
+	};
+	return editor;
+}
+
+function withImages(editor: Editor) {
+	const { isVoid } = editor;
+	editor.isVoid = (element: SlateElement) =>
+		(element as SlateElement & { type?: string }).type === "image"
+			? true
+			: isVoid(element);
+	return editor;
+}
+
 function insertParagraphBelow(editor: Editor, path: number[]) {
 	const newBlock: ParagraphElement = {
 		type: "paragraph",
@@ -211,14 +287,45 @@ async function insertImageBelow(
 	const insertPath = [...path];
 	insertPath[insertPath.length - 1] = insertPath[insertPath.length - 1] + 1;
 	Transforms.insertNodes(editor, node, { at: insertPath });
+	// Crear párrafo debajo y enfocar
+	const paragraphPath = [...insertPath];
+	paragraphPath[paragraphPath.length - 1] += 1;
+	const paragraph: ParagraphElement = {
+		type: "paragraph",
+		children: [{ text: "" }],
+	};
+	Transforms.insertNodes(editor, paragraph, { at: paragraphPath });
+	Transforms.select(editor, Editor.start(editor, paragraphPath));
+}
+
+function deleteBlock(editor: Editor, path: number[]) {
+	try {
+		Transforms.removeNodes(editor, { at: path });
+		// Si documento vacío, insertar un párrafo
+		if (editor.children.length === 0) {
+			Transforms.insertNodes(
+				editor,
+				{
+					type: "paragraph",
+					children: [{ text: "" }],
+				} as unknown as SlateElement,
+				{ at: [0] }
+			);
+			Transforms.select(editor, Editor.start(editor, [0]));
+		}
+	} catch {
+		/* ignore */
+	}
 }
 
 const BlockActions = ({
 	editor,
 	element,
+	visible,
 }: {
 	editor: Editor;
 	element: SlateElement;
+	visible: boolean;
 }) => {
 	const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
 	const open = Boolean(anchorEl);
@@ -238,30 +345,58 @@ const BlockActions = ({
 		cb();
 		setAnchorEl(null);
 	};
+	if (!visible && !anchorEl) {
+		return null;
+	}
 	return (
 		<Box
 			contentEditable={false}
 			sx={{
 				position: "absolute",
-				left: -40,
-				top: 0,
+				left: 4,
+				top: 2,
 				display: "flex",
 				flexDirection: "column",
 				gap: 0.5,
-				opacity: 0.5,
+				bgcolor: "rgba(45,45,45,.75)",
+				p: 0.5,
+				borderRadius: 1,
+				boxShadow: 1,
+				opacity: 0.9,
+				transition: "opacity .12s",
 				"&:hover": { opacity: 1 },
+				zIndex: 2,
 			}}
 		>
-			<IconButton size="small" onClick={(e) => setAnchorEl(e.currentTarget)}>
+			<IconButton
+				size="small"
+				onMouseDown={(e) => e.preventDefault()}
+				onClick={(e) => setAnchorEl(e.currentTarget)}
+			>
 				<AddIcon fontSize="inherit" />
 			</IconButton>
-			<IconButton size="small" onClick={() => move(-1)}>
-				<ArrowUpwardIcon fontSize="inherit" />
-			</IconButton>
-			<IconButton size="small" onClick={() => move(1)}>
-				<ArrowDownwardIcon fontSize="inherit" />
-			</IconButton>
 			<Menu anchorEl={anchorEl} open={open} onClose={() => setAnchorEl(null)}>
+				<MenuItem
+					onClick={() => handleAdd(() => move(-1))}
+					disabled={path[path.length - 1] === 0}
+				>
+					<ListItemIcon>
+						<ArrowUpwardIcon fontSize="small" />
+					</ListItemIcon>
+					<ListItemText primary="Mover arriba" />
+				</MenuItem>
+				<MenuItem onClick={() => handleAdd(() => move(1))}>
+					<ListItemIcon>
+						<ArrowDownwardIcon fontSize="small" />
+					</ListItemIcon>
+					<ListItemText primary="Mover abajo" />
+				</MenuItem>
+				<MenuItem onClick={() => handleAdd(() => deleteBlock(editor, path))}>
+					<ListItemIcon>
+						<DeleteIcon fontSize="small" color="error" />
+					</ListItemIcon>
+					<ListItemText primary="Eliminar" sx={{ color: "error.main" }} />
+				</MenuItem>
 				<MenuItem
 					onClick={() => handleAdd(() => insertParagraphBelow(editor, path))}
 				>
@@ -350,15 +485,42 @@ interface ElementProps {
 	editor: Editor;
 }
 const Element = ({ attributes, children, element, editor }: ElementProps) => {
+	const selected = useSelected();
+	const focused = useFocused();
+	const [hover, setHover] = React.useState(false);
+	// Fallback: comprobar selección manual por path (a veces useSelected falla tras borrar nodos)
+	let manualActive = false;
+	try {
+		const sel = editor.selection;
+		if (sel) {
+			const [start] = Range.edges(sel);
+			const elementPath = ReactEditor.findPath(
+				editor as ReactEditor,
+				element
+			) as unknown as number[];
+			if (start.path[0] === elementPath[0]) manualActive = true;
+		}
+	} catch {
+		/* ignore selection path issues */
+	}
+	const show = (selected && focused) || hover || manualActive; // mostrar en selección o hover
+	const GUTTER = 48; // espacio para la barra
+	const needsGutter = !["list-item"].includes(element.type);
 	const wrapperStyle: React.CSSProperties = {
 		position: "relative",
-		paddingLeft: element.type !== "list-item" ? 0 : undefined,
+		paddingLeft: needsGutter ? GUTTER : 0,
+		overflow: "visible",
 	};
 	switch (element.type) {
 		case "heading-one":
 			return (
-				<div style={wrapperStyle}>
-					<BlockActions editor={editor} element={element} />
+				<div
+					role="presentation"
+					style={wrapperStyle}
+					onMouseEnter={() => setHover(true)}
+					onMouseLeave={() => setHover(false)}
+				>
+					<BlockActions editor={editor} element={element} visible={show} />
 					<h1
 						{...attributes}
 						style={{ fontSize: "1.9rem", margin: "1.2rem 0 .6rem" }}
@@ -369,8 +531,13 @@ const Element = ({ attributes, children, element, editor }: ElementProps) => {
 			);
 		case "heading-two":
 			return (
-				<div style={wrapperStyle}>
-					<BlockActions editor={editor} element={element} />
+				<div
+					role="presentation"
+					style={wrapperStyle}
+					onMouseEnter={() => setHover(true)}
+					onMouseLeave={() => setHover(false)}
+				>
+					<BlockActions editor={editor} element={element} visible={show} />
 					<h2
 						{...attributes}
 						style={{ fontSize: "1.5rem", margin: "1rem 0 .5rem" }}
@@ -381,8 +548,13 @@ const Element = ({ attributes, children, element, editor }: ElementProps) => {
 			);
 		case "bulleted-list":
 			return (
-				<div style={wrapperStyle}>
-					<BlockActions editor={editor} element={element} />
+				<div
+					role="presentation"
+					style={wrapperStyle}
+					onMouseEnter={() => setHover(true)}
+					onMouseLeave={() => setHover(false)}
+				>
+					<BlockActions editor={editor} element={element} visible={show} />
 					<ul {...attributes} style={{ marginLeft: 20 }}>
 						{children}
 					</ul>
@@ -390,8 +562,13 @@ const Element = ({ attributes, children, element, editor }: ElementProps) => {
 			);
 		case "numbered-list":
 			return (
-				<div style={wrapperStyle}>
-					<BlockActions editor={editor} element={element} />
+				<div
+					role="presentation"
+					style={wrapperStyle}
+					onMouseEnter={() => setHover(true)}
+					onMouseLeave={() => setHover(false)}
+				>
+					<BlockActions editor={editor} element={element} visible={show} />
 					<ol {...attributes} style={{ marginLeft: 20 }}>
 						{children}
 					</ol>
@@ -401,8 +578,13 @@ const Element = ({ attributes, children, element, editor }: ElementProps) => {
 			return <li {...attributes}>{children}</li>;
 		case "block-quote":
 			return (
-				<div style={wrapperStyle}>
-					<BlockActions editor={editor} element={element} />
+				<div
+					role="presentation"
+					style={wrapperStyle}
+					onMouseEnter={() => setHover(true)}
+					onMouseLeave={() => setHover(false)}
+				>
+					<BlockActions editor={editor} element={element} visible={show} />
 					<blockquote
 						{...attributes}
 						style={{
@@ -418,8 +600,13 @@ const Element = ({ attributes, children, element, editor }: ElementProps) => {
 			);
 		case "code-block":
 			return (
-				<div style={wrapperStyle}>
-					<BlockActions editor={editor} element={element} />
+				<div
+					role="presentation"
+					style={wrapperStyle}
+					onMouseEnter={() => setHover(true)}
+					onMouseLeave={() => setHover(false)}
+				>
+					<BlockActions editor={editor} element={element} visible={show} />
 					<pre
 						{...attributes}
 						style={{
@@ -428,6 +615,8 @@ const Element = ({ attributes, children, element, editor }: ElementProps) => {
 							padding: 12,
 							borderRadius: 6,
 							overflowX: "auto",
+							fontFamily: "Menlo,Consolas,monospace",
+							whiteSpace: "pre-wrap",
 						}}
 					>
 						<code>{children}</code>
@@ -436,8 +625,13 @@ const Element = ({ attributes, children, element, editor }: ElementProps) => {
 			);
 		case "divider":
 			return (
-				<div style={wrapperStyle}>
-					<BlockActions editor={editor} element={element} />
+				<div
+					role="presentation"
+					style={wrapperStyle}
+					onMouseEnter={() => setHover(true)}
+					onMouseLeave={() => setHover(false)}
+				>
+					<BlockActions editor={editor} element={element} visible={show} />
 					<hr
 						{...attributes}
 						style={{
@@ -450,8 +644,13 @@ const Element = ({ attributes, children, element, editor }: ElementProps) => {
 			);
 		case "image":
 			return (
-				<div style={{ position: "relative", margin: "12px 0" }}>
-					<BlockActions editor={editor} element={element} />
+				<div
+					role="presentation"
+					style={{ position: "relative", margin: "12px 0" }}
+					onMouseEnter={() => setHover(true)}
+					onMouseLeave={() => setHover(false)}
+				>
+					<BlockActions editor={editor} element={element} visible={show} />
 					<img
 						{...attributes}
 						src={element.url}
@@ -463,8 +662,13 @@ const Element = ({ attributes, children, element, editor }: ElementProps) => {
 			);
 		default:
 			return (
-				<div style={wrapperStyle}>
-					<BlockActions editor={editor} element={element} />
+				<div
+					role="presentation"
+					style={wrapperStyle}
+					onMouseEnter={() => setHover(true)}
+					onMouseLeave={() => setHover(false)}
+				>
+					<BlockActions editor={editor} element={element} visible={show} />
 					<p {...attributes} style={{ margin: "4px 0" }}>
 						{children}
 					</p>
@@ -542,7 +746,10 @@ export default function RichEditor({
 		[safeValue]
 	);
 	const editor = useMemo(
-		() => withShortcuts(withReact(createEditor() as ReactEditor)),
+		() =>
+			withImages(
+				withCodeBlock(withShortcuts(withReact(createEditor() as ReactEditor)))
+			),
 		[]
 	);
 	const [internal, setInternal] = useState<Descendant[]>(initial);
